@@ -1,537 +1,484 @@
-const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-const path = require('path');
-
-const app = express();
-const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
-});
-
-app.use(express.static(path.join(__dirname, 'public')));
-
-const PORT = 3000;
-const MAP_WIDTH = 5000;
-const MAP_HEIGHT = 5000;
-const MAX_PLAYERS = 50;
-const FOOD_COUNT = 800;
-const BOT_COUNT = 30;
-const UPDATE_RATE = 1000 / 60; // 60 FPS
-
-let players = {};
-let foods = [];
-let bots = {};
-let nextBotId = 1;
-
-// Класс игрока
-class Player {
-  constructor(id, name, x, y, color) {
-    this.id = id;
-    this.name = name || 'Игрок';
-    this.x = x;
-    this.y = y;
-    this.size = 32;
-    this.color = color;
-    this.mass = 32;
-    this.targetX = x;
-    this.targetY = y;
-    this.cells = [{
-      id: `${id}_0`,
-      x: x,
-      y: y,
-      size: 32,
-      mass: 32
-    }];
-    this.lastSplit = 0;
-    this.lastEject = 0;
-  }
-}
-
-// Класс бота
-class Bot {
-  constructor(id, name, x, y, color) {
-    this.id = id;
-    this.name = name;
-    this.x = x;
-    this.y = y;
-    this.size = Math.random() * 60 + 25;
-    this.mass = this.size;
-    this.color = color;
-    this.targetX = x;
-    this.targetY = y;
-    this.lastMove = Date.now();
-    this.isBot = true;
-  }
-}
-
-// Генерация случайного цвета
-function getRandomColor() {
-  const hue = Math.random() * 360;
-  return `hsl(${hue}, 70%, 55%)`;
-}
-
-// Генерация имени бота
-function getBotName() {
-  const names = ['🤖 Alpha', '🤖 Beta', '🤖 Gamma', '🤖 Delta', '🤖 Omega', 
-                  '🤖 Prime', '🤖 Neo', '🤖 Zero', '🤖 Cyber', '🤖 Quantum'];
-  return names[Math.floor(Math.random() * names.length)];
-}
-
-// Создание еды
-function createFood() {
-  return {
-    id: Math.random(),
-    x: Math.random() * MAP_WIDTH,
-    y: Math.random() * MAP_HEIGHT,
-    size: 8,
-    mass: 8
-  };
-}
-
-// Инициализация еды
-function initFoods() {
-  foods = [];
-  for (let i = 0; i < FOOD_COUNT; i++) {
-    foods.push(createFood());
-  }
-}
-
-// Инициализация ботов
-function initBots() {
-  bots = {};
-  for (let i = 0; i < BOT_COUNT; i++) {
-    const botId = `bot_${nextBotId++}`;
-    bots[botId] = new Bot(
-      botId,
-      getBotName(),
-      Math.random() * MAP_WIDTH,
-      Math.random() * MAP_HEIGHT,
-      getRandomColor()
-    );
-  }
-}
-
-// Проверка коллизии и поедание
-function checkEat(consumer, target) {
-  const consumerSize = consumer.size;
-  const targetSize = target.size;
-  
-  // Условие поедания: потребитель на 15% больше цели
-  if (consumerSize > targetSize * 1.15) {
-    const dx = consumer.x - target.x;
-    const dy = consumer.y - target.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    
-    if (distance < consumerSize + targetSize - 5) {
-      consumer.mass += target.mass;
-      consumer.size = Math.sqrt(consumer.mass) * 1.5;
-      return true;
-    }
-  }
-  return false;
-}
-
-// Движение игрока
-function movePlayer(player, deltaTime) {
-  const speed = Math.max(100, 800 - player.size * 1.5) * deltaTime;
-  
-  let dx = player.targetX - player.x;
-  let dy = player.targetY - player.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  
-  if (distance > 0.01) {
-    const move = Math.min(speed, distance);
-    player.x += (dx / distance) * move;
-    player.y += (dy / distance) * move;
-  }
-  
-  // Границы карты
-  player.x = Math.max(player.size, Math.min(MAP_WIDTH - player.size, player.x));
-  player.y = Math.max(player.size, Math.min(MAP_HEIGHT - player.size, player.y));
-}
-
-// ИИ для ботов
-function moveBot(bot, deltaTime) {
-  // Поиск ближайшей еды или меньшего игрока
-  let closestTarget = null;
-  let minDistance = Infinity;
-  
-  // Ищем еду
-  for (let food of foods) {
-    const dx = food.x - bot.x;
-    const dy = food.y - bot.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    
-    if (distance < minDistance && distance < 500) {
-      minDistance = distance;
-      closestTarget = food;
-    }
-  }
-  
-  // Ищем игроков меньше себя
-  for (let id in players) {
-    const player = players[id];
-    if (player.size < bot.size * 0.85) {
-      const dx = player.x - bot.x;
-      const dy = player.y - bot.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      if (distance < minDistance && distance < 600) {
-        minDistance = distance;
-        closestTarget = player;
-      }
-    }
-  }
-  
-  if (closestTarget) {
-    bot.targetX = closestTarget.x;
-    bot.targetY = closestTarget.y;
-  } else {
-    // Случайное движение
-    if (Math.random() < 0.02) {
-      bot.targetX = Math.random() * MAP_WIDTH;
-      bot.targetY = Math.random() * MAP_HEIGHT;
-    }
-  }
-  
-  // Движение бота
-  const speed = Math.max(80, 500 - bot.size * 1.2) * deltaTime;
-  let dx = bot.targetX - bot.x;
-  let dy = bot.targetY - bot.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  
-  if (distance > 0.01) {
-    const move = Math.min(speed, distance);
-    bot.x += (dx / distance) * move;
-    bot.y += (dy / distance) * move;
-  }
-  
-  // Границы
-  bot.x = Math.max(bot.size, Math.min(MAP_WIDTH - bot.size, bot.x));
-  bot.y = Math.max(bot.size, Math.min(MAP_HEIGHT - bot.size, bot.y));
-}
-
-// Обработка сплита
-function splitPlayer(player) {
-  const now = Date.now();
-  if (now - player.lastSplit < 3000) return false;
-  
-  if (player.cells.length >= 16) return false;
-  
-  const newCells = [];
-  const oldCells = player.cells;
-  
-  for (let cell of oldCells) {
-    if (cell.size > 60) {
-      const newSize = cell.size / 2;
-      const angle = Math.atan2(player.targetY - cell.y, player.targetX - cell.x);
-      const offset = cell.size / 2;
-      
-      const newCell1 = {
-        id: `${player.id}_${Date.now()}_${Math.random()}`,
-        x: cell.x + Math.cos(angle) * offset,
-        y: cell.y + Math.sin(angle) * offset,
-        size: newSize,
-        mass: cell.mass / 2
-      };
-      
-      const newCell2 = {
-        id: `${player.id}_${Date.now()}_${Math.random()}`,
-        x: cell.x - Math.cos(angle) * offset,
-        y: cell.y - Math.sin(angle) * offset,
-        size: newSize,
-        mass: cell.mass / 2
-      };
-      
-      newCells.push(newCell1, newCell2);
-    } else {
-      newCells.push(cell);
-    }
-  }
-  
-  player.cells = newCells;
-  player.lastSplit = now;
-  return true;
-}
-
-// Выброс массы
-function ejectMass(player) {
-  const now = Date.now();
-  if (now - player.lastEject < 500) return false;
-  
-  if (player.cells.length > 0 && player.size > 40) {
-    const cell = player.cells[0];
-    const ejectMass = Math.min(15, cell.mass * 0.1);
-    
-    if (ejectMass > 0) {
-      cell.mass -= ejectMass;
-      cell.size = Math.sqrt(cell.mass) * 1.5;
-      
-      const angle = Math.atan2(player.targetY - cell.y, player.targetX - cell.x);
-      foods.push({
-        id: Math.random(),
-        x: cell.x + Math.cos(angle) * cell.size,
-        y: cell.y + Math.sin(angle) * cell.size,
-        size: 10,
-        mass: ejectMass
-      });
-      
-      player.lastEject = now;
-      return true;
-    }
-  }
-  return false;
-}
-
-// Обновление игрового состояния
-function updateGame() {
-  const deltaTime = 1 / 60;
-  
-  // Движение игроков
-  for (let id in players) {
-    const player = players[id];
-    if (player.cells.length > 0) {
-      // Для простоты используем первую клетку
-      const mainCell = player.cells[0];
-      player.x = mainCell.x;
-      player.y = mainCell.y;
-      player.size = mainCell.size;
-      player.mass = mainCell.mass;
-      
-      movePlayer(player, deltaTime);
-      
-      // Обновляем позицию клетки
-      mainCell.x = player.x;
-      mainCell.y = player.y;
-    }
-  }
-  
-  // Движение ботов
-  for (let id in bots) {
-    moveBot(bots[id], deltaTime);
-  }
-  
-  // Проверка поедания еды игроками
-  for (let id in players) {
-    const player = players[id];
-    for (let i = foods.length - 1; i >= 0; i--) {
-      const food = foods[i];
-      const dx = player.x - food.x;
-      const dy = player.y - food.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      if (distance < player.size + food.size) {
-        player.mass += food.mass;
-        player.size = Math.sqrt(player.mass) * 1.5;
-        player.cells[0].mass = player.mass;
-        player.cells[0].size = player.size;
-        foods.splice(i, 1);
-        foods.push(createFood());
-      }
-    }
-  }
-  
-  // Проверка поедания еды ботами
-  for (let id in bots) {
-    const bot = bots[id];
-    for (let i = foods.length - 1; i >= 0; i--) {
-      const food = foods[i];
-      const dx = bot.x - food.x;
-      const dy = bot.y - food.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      if (distance < bot.size + food.size) {
-        bot.mass += food.mass;
-        bot.size = Math.sqrt(bot.mass) * 1.5;
-        foods.splice(i, 1);
-        foods.push(createFood());
-      }
-    }
-  }
-  
-  // Проверка поедания игроков
-  const playersToRemove = [];
-  for (let id1 in players) {
-    const player1 = players[id1];
-    for (let id2 in players) {
-      if (id1 !== id2) {
-        const player2 = players[id2];
-        if (checkEat(player1, player2)) {
-          player1.mass += player2.mass;
-          player1.size = Math.sqrt(player1.mass) * 1.5;
-          player1.cells[0].mass = player1.mass;
-          player1.cells[0].size = player1.size;
-          playersToRemove.push(id2);
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Agar.io Clone</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
         }
-      }
-    }
-  }
-  
-  // Удаление съеденных игроков
-  for (let id of playersToRemove) {
-    delete players[id];
-    io.emit('playerEaten', id);
-  }
-  
-  // Проверка поедания ботов игроками
-  const botsToRemove = [];
-  for (let id in players) {
-    const player = players[id];
-    for (let botId in bots) {
-      const bot = bots[botId];
-      if (checkEat(player, bot)) {
-        player.mass += bot.mass;
-        player.size = Math.sqrt(player.mass) * 1.5;
-        player.cells[0].mass = player.mass;
-        player.cells[0].size = player.size;
-        botsToRemove.push(botId);
-      }
-    }
-  }
-  
-  // Удаление съеденных ботов и создание новых
-  for (let botId of botsToRemove) {
-    delete bots[botId];
-    const newBotId = `bot_${nextBotId++}`;
-    bots[newBotId] = new Bot(
-      newBotId,
-      getBotName(),
-      Math.random() * MAP_WIDTH,
-      Math.random() * MAP_HEIGHT,
-      getRandomColor()
-    );
-  }
-  
-  // Проверка поедания игроков ботами
-  const playersToEat = [];
-  for (let botId in bots) {
-    const bot = bots[botId];
-    for (let playerId in players) {
-      const player = players[playerId];
-      if (bot.size > player.size * 1.15) {
-        const dx = bot.x - player.x;
-        const dy = bot.y - player.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        body {
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            background: #0a1a0a;
+        }
+
+        #menu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a3a1a 0%, #0a1a0a 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .menu-container {
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            box-shadow: 0 0 50px rgba(0, 255, 0, 0.3);
+            border: 1px solid #00ff44;
+        }
+
+        h1 {
+            color: #00ff44;
+            font-size: 48px;
+            margin-bottom: 20px;
+            text-shadow: 0 0 20px rgba(0, 255, 68, 0.5);
+        }
+
+        input {
+            width: 300px;
+            padding: 12px 20px;
+            font-size: 18px;
+            margin: 20px 0;
+            border: 2px solid #00ff44;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            outline: none;
+        }
+
+        button {
+            padding: 12px 40px;
+            font-size: 20px;
+            background: linear-gradient(135deg, #00ff44 0%, #00aa44 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(0, 255, 68, 0.5);
+        }
+
+        #gameContainer {
+            position: relative;
+            display: none;
+        }
+
+        canvas {
+            display: block;
+            cursor: crosshair;
+        }
+
+        .ui {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .stats {
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            padding: 10px 20px;
+            border-radius: 10px;
+            display: inline-block;
+            color: #00ff44;
+            font-weight: bold;
+            font-size: 18px;
+            border-left: 3px solid #00ff44;
+        }
+
+        .leaderboard {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            padding: 15px;
+            border-radius: 10px;
+            min-width: 250px;
+            max-height: 400px;
+            overflow-y: auto;
+            pointer-events: auto;
+            border-right: 3px solid #00ff44;
+        }
+
+        .leaderboard h3 {
+            color: #ffaa44;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .leaderboard div {
+            color: white;
+            padding: 5px;
+            font-size: 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            padding: 10px 15px;
+            border-radius: 10px;
+            color: white;
+            font-size: 12px;
+            pointer-events: none;
+        }
+
+        .controls span {
+            color: #00ff44;
+            font-weight: bold;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .split-effect {
+            animation: pulse 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div id="menu">
+        <div class="menu-container">
+            <h1>🍃 AGAR.IO CLONE</h1>
+            <input type="text" id="nickname" placeholder="Введите никнейм" maxlength="15">
+            <br>
+            <button id="playBtn">▶ ИГРАТЬ</button>
+            <div class="controls" style="position: relative; margin-top: 20px; background: transparent;">
+                <span>🎮 Управление:</span> Мышь - движение | Пробел/Клик - разделение
+            </div>
+        </div>
+    </div>
+
+    <div id="gameContainer">
+        <canvas id="canvas"></canvas>
+        <div class="ui">
+            <div class="stats">
+                📊 Размер: <span id="sizeDisplay">0</span>
+            </div>
+        </div>
+        <div class="leaderboard">
+            <h3>🏆 ТОП ИГРОКОВ</h3>
+            <div id="leaders"></div>
+        </div>
+        <div class="controls">
+            <span>🎮 Управление:</span> Мышь - движение | Пробел/Клик - разделение | E - выброс массы
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io({
+            transports: ['websocket']
+        });
         
-        if (distance < bot.size + player.size) {
-          bot.mass += player.mass;
-          bot.size = Math.sqrt(bot.mass) * 1.5;
-          playersToEat.push(playerId);
+        let canvas, ctx;
+        let playerId = null;
+        let mapWidth = 4000, mapHeight = 4000;
+        let camera = { x: 0, y: 0 };
+        let players = {};
+        let foods = [];
+        let bots = {};
+        let myPlayer = null;
+
+        let VIEW_WIDTH = window.innerWidth;
+        let VIEW_HEIGHT = window.innerHeight;
+
+        let mouseX = VIEW_WIDTH / 2;
+        let mouseY = VIEW_HEIGHT / 2;
+        
+        let frameRequest = null;
+        let lastTimestamp = 0;
+        let frameInterval = 1000 / 50;
+        
+        let splitEffect = false;
+        let effectTimer = null;
+
+        socket.on('init', (data) => {
+            playerId = data.id;
+            mapWidth = data.mapWidth;
+            mapHeight = data.mapHeight;
+            
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('gameContainer').style.display = 'block';
+            
+            initCanvas();
+            startGameLoop();
+            
+            window.addEventListener('resize', () => {
+                VIEW_WIDTH = window.innerWidth;
+                VIEW_HEIGHT = window.innerHeight;
+                canvas.width = VIEW_WIDTH;
+                canvas.height = VIEW_HEIGHT;
+            });
+        });
+
+        socket.on('gameState', (data) => {
+            players = data.players;
+            foods = data.foods || [];
+            bots = data.bots || {};
+            
+            if (players[playerId]) {
+                myPlayer = players[playerId];
+                document.getElementById('sizeDisplay').innerText = Math.floor(myPlayer.size);
+            }
+            
+            updateLeaderboard();
+        });
+        
+        socket.on('playerEaten', (id) => {
+            if (id === playerId) {
+                const gameContainer = document.getElementById('gameContainer');
+                gameContainer.style.opacity = '0.5';
+                setTimeout(() => {
+                    gameContainer.style.opacity = '1';
+                }, 500);
+            }
+        });
+
+        function initCanvas() {
+            canvas = document.getElementById('canvas');
+            canvas.width = VIEW_WIDTH;
+            canvas.height = VIEW_HEIGHT;
+            ctx = canvas.getContext('2d');
+            
+            let lastMouseEmit = 0;
+            const MOUSE_EMIT_DELAY = 33; // 30fps для мыши
+            
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                
+                let canvasX = (e.clientX - rect.left) * scaleX;
+                let canvasY = (e.clientY - rect.top) * scaleY;
+                
+                const worldX = camera.x + canvasX;
+                const worldY = camera.y + canvasY;
+                
+                mouseX = worldX;
+                mouseY = worldY;
+                
+                const now = Date.now();
+                if (now - lastMouseEmit > MOUSE_EMIT_DELAY) {
+                    socket.emit('mouseMove', { x: worldX, y: worldY });
+                    lastMouseEmit = now;
+                }
+            });
+            
+            canvas.addEventListener('click', () => {
+                socket.emit('split');
+                splitEffect = true;
+                if (effectTimer) clearTimeout(effectTimer);
+                effectTimer = setTimeout(() => {
+                    splitEffect = false;
+                }, 300);
+            });
+            
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    socket.emit('split');
+                    splitEffect = true;
+                    if (effectTimer) clearTimeout(effectTimer);
+                    effectTimer = setTimeout(() => {
+                        splitEffect = false;
+                    }, 300);
+                }
+                if (e.code === 'KeyE') {
+                    e.preventDefault();
+                    socket.emit('eject');
+                }
+            });
         }
-      }
-    }
-  }
-  
-  // Удаление съеденных игроков
-  for (let playerId of playersToEat) {
-    delete players[playerId];
-    io.emit('playerEaten', playerId);
-  }
-}
 
-// Отправка состояния игры
-function sendGameState() {
-  const gameState = {
-    players: {},
-    foods: foods,
-    bots: bots
-  };
-  
-  // Отправляем данные игроков
-  for (let id in players) {
-    const player = players[id];
-    gameState.players[id] = {
-      id: player.id,
-      name: player.name,
-      x: player.x,
-      y: player.y,
-      size: player.size,
-      color: player.color,
-      cells: player.cells
-    };
-  }
-  
-  io.emit('gameState', gameState);
-}
+        function updateLeaderboard() {
+            const allPlayers = [...Object.values(players), ...Object.values(bots)];
+            const sorted = allPlayers.sort((a, b) => b.size - a.size);
+            const top10 = sorted.slice(0, 10);
+            
+            const leadersDiv = document.getElementById('leaders');
+            leadersDiv.innerHTML = top10.map((p, i) => {
+                const isPlayer = p.id === playerId;
+                const prefix = isPlayer ? '👉 ' : `${i+1}. `;
+                const name = p.name || (p.id?.startsWith('bot') ? p.name || '🤖 Бот' : 'Игрок');
+                return `<div style="${isPlayer ? 'color: #00ff44; font-weight: bold;' : ''}">
+                    ${prefix}${name} - ${Math.floor(p.size)}
+                </div>`;
+            }).join('');
+        }
 
-// Обработка подключения
-io.on('connection', (socket) => {
-  console.log('Игрок подключился:', socket.id);
-  
-  // Создание нового игрока
-  const playerId = socket.id;
-  const player = new Player(
-    playerId,
-    'Игрок',
-    Math.random() * MAP_WIDTH,
-    Math.random() * MAP_HEIGHT,
-    getRandomColor()
-  );
-  
-  players[playerId] = player;
-  
-  socket.emit('init', {
-    id: playerId,
-    mapWidth: MAP_WIDTH,
-    mapHeight: MAP_HEIGHT
-  });
-  
-  // Установка имени
-  socket.on('setName', (name) => {
-    if (name && name.length > 0 && name.length < 20) {
-      players[playerId].name = name;
-    }
-  });
-  
-  // Движение мыши
-  socket.on('mouseMove', (data) => {
-    if (players[playerId]) {
-      players[playerId].targetX = Math.max(0, Math.min(MAP_WIDTH, data.x));
-      players[playerId].targetY = Math.max(0, Math.min(MAP_HEIGHT, data.y));
-    }
-  });
-  
-  // Сплит
-  socket.on('split', () => {
-    if (players[playerId]) {
-      splitPlayer(players[playerId]);
-    }
-  });
-  
-  // Выброс массы
-  socket.on('eject', () => {
-    if (players[playerId]) {
-      ejectMass(players[playerId]);
-    }
-  });
-  
-  // Отключение
-  socket.on('disconnect', () => {
-    console.log('Игрок отключился:', socket.id);
-    delete players[playerId];
-  });
-});
+        function startGameLoop() {
+            function updateCamera() {
+                if (myPlayer) {
+                    camera.x = myPlayer.x - VIEW_WIDTH / 2;
+                    camera.y = myPlayer.y - VIEW_HEIGHT / 2;
+                    
+                    camera.x = Math.max(0, Math.min(mapWidth - VIEW_WIDTH, camera.x));
+                    camera.y = Math.max(0, Math.min(mapHeight - VIEW_HEIGHT, camera.y));
+                }
+            }
+            
+            function draw() {
+                if (!ctx) return;
+                
+                // Очистка
+                ctx.fillStyle = '#1a2a1a';
+                ctx.fillRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+                
+                // Простая сетка
+                ctx.strokeStyle = '#2a4a2a';
+                ctx.lineWidth = 1;
+                const gridSize = 100;
+                const startX = Math.floor(camera.x / gridSize) * gridSize;
+                const startY = Math.floor(camera.y / gridSize) * gridSize;
+                
+                for (let x = startX; x < camera.x + VIEW_WIDTH; x += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(x - camera.x, 0);
+                    ctx.lineTo(x - camera.x, VIEW_HEIGHT);
+                    ctx.stroke();
+                }
+                for (let y = startY; y < camera.y + VIEW_HEIGHT; y += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y - camera.y);
+                    ctx.lineTo(VIEW_WIDTH, y - camera.y);
+                    ctx.stroke();
+                }
+                
+                // Еда
+                for (let f of foods) {
+                    const screenX = f.x - camera.x;
+                    const screenY = f.y - camera.y;
+                    if (screenX + f.size > 0 && screenX - f.size < VIEW_WIDTH &&
+                        screenY + f.size > 0 && screenY - f.size < VIEW_HEIGHT) {
+                        
+                        ctx.beginPath();
+                        ctx.arc(screenX, screenY, f.size, 0, Math.PI * 2);
+                        ctx.fillStyle = '#44ff44';
+                        ctx.fill();
+                        ctx.beginPath();
+                        ctx.arc(screenX - 1, screenY - 1, f.size / 3, 0, Math.PI * 2);
+                        ctx.fillStyle = '#aaffaa';
+                        ctx.fill();
+                    }
+                }
+                
+                // Боты
+                for (let id in bots) {
+                    const b = bots[id];
+                    const screenX = b.x - camera.x;
+                    const screenY = b.y - camera.y;
+                    if (screenX + b.size > 0 && screenX - b.size < VIEW_WIDTH &&
+                        screenY + b.size > 0 && screenY - b.size < VIEW_HEIGHT) {
+                        
+                        ctx.beginPath();
+                        ctx.arc(screenX, screenY, b.size, 0, Math.PI * 2);
+                        ctx.fillStyle = b.color;
+                        ctx.fill();
+                        ctx.strokeStyle = '#fff';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                        
+                        ctx.font = `bold ${Math.max(10, Math.floor(b.size / 4))}px Arial`;
+                        ctx.fillStyle = '#fff';
+                        ctx.fillText(b.name, screenX - ctx.measureText(b.name).width / 2, screenY - b.size / 2 - 3);
+                    }
+                }
+                
+                // Игроки
+                for (let id in players) {
+                    const p = players[id];
+                    const screenX = p.x - camera.x;
+                    const screenY = p.y - camera.y;
+                    if (screenX + p.size > 0 && screenX - p.size < VIEW_WIDTH &&
+                        screenY + p.size > 0 && screenY - p.size < VIEW_HEIGHT) {
+                        
+                        ctx.beginPath();
+                        ctx.arc(screenX, screenY, p.size, 0, Math.PI * 2);
+                        
+                        if (id === playerId) {
+                            const grad = ctx.createRadialGradient(screenX - 3, screenY - 3, 3, screenX, screenY, p.size);
+                            grad.addColorStop(0, '#88ff88');
+                            grad.addColorStop(1, '#33aa33');
+                            ctx.fillStyle = grad;
+                            if (splitEffect) {
+                                ctx.shadowBlur = 15;
+                                ctx.shadowColor = '#88ff88';
+                            }
+                        } else {
+                            ctx.fillStyle = p.color;
+                        }
+                        ctx.fill();
+                        ctx.shadowBlur = 0;
+                        ctx.strokeStyle = '#fff';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                        
+                        ctx.font = `bold ${Math.max(10, Math.floor(p.size / 4))}px Arial`;
+                        ctx.fillStyle = '#fff';
+                        ctx.fillText(p.name, screenX - ctx.measureText(p.name).width / 2, screenY - p.size / 2 - 3);
+                    }
+                }
+                
+                // Прицел
+                if (myPlayer) {
+                    ctx.beginPath();
+                    ctx.arc(mouseX - camera.x, mouseY - camera.y, 12, 0, Math.PI * 2);
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(mouseX - camera.x - 18, mouseY - camera.y);
+                    ctx.lineTo(mouseX - camera.x + 18, mouseY - camera.y);
+                    ctx.moveTo(mouseX - camera.x, mouseY - camera.y - 18);
+                    ctx.lineTo(mouseX - camera.x, mouseY - camera.y + 18);
+                    ctx.stroke();
+                }
+            }
+            
+            function animate(timestamp) {
+                if (timestamp - lastTimestamp >= frameInterval) {
+                    updateCamera();
+                    draw();
+                    lastTimestamp = timestamp;
+                }
+                frameRequest = requestAnimationFrame(animate);
+            }
+            
+            animate(0);
+        }
 
-// Инициализация игры
-initFoods();
-initBots();
-
-// Игровой цикл
-setInterval(() => {
-  updateGame();
-}, UPDATE_RATE);
-
-// Отправка состояния
-setInterval(() => {
-  sendGameState();
-}, UPDATE_RATE);
-
-server.listen(PORT, () => {
-  console.log(`Сервер запущен на http://localhost:${PORT}`);
-  console.log(`Карта: ${MAP_WIDTH}x${MAP_HEIGHT}`);
-  console.log(`Еды: ${FOOD_COUNT}, Ботов: ${BOT_COUNT}`);
-});
+        document.getElementById('playBtn').addEventListener('click', () => {
+            const name = document.getElementById('nickname').value.trim();
+            socket.emit('setName', name || 'Игрок');
+        });
+    </script>
+</body>
+</html>

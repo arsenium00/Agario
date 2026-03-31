@@ -15,11 +15,21 @@ const MAP_HEIGHT = 2200;
 let mouseX = canvas.width / 2;
 let mouseY = canvas.height / 2;
 
-// Подключение к серверу
-function connectToServer() {
-  // Если запускаешь локально — можно оставить "http://localhost:3000"
-  // На Render/Railway используй текущий адрес сайта
-  socket = io();   // автоматически берёт текущий хост
+// ==================== ПОДКЛЮЧЕНИЕ ====================
+function connect() {
+  const url = window.location.origin;   // автоматически берёт Render URL
+
+  socket = io(url, {
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 800,
+    timeout: 20000,
+    transports: ['websocket', 'polling']
+  });
+
+  socket.on('connect', () => {
+    console.log('Подключено к серверу');
+  });
 
   socket.on('init', (data) => {
     myId = data.id;
@@ -28,89 +38,66 @@ function connectToServer() {
   socket.on('gameState', (state) => {
     players = state.players || {};
     foods = state.foods || [];
-    bots = state.bots || {};
+    bots = state.bots || [];
 
     if (players[myId]) {
       myPlayer = players[myId];
       document.getElementById('sizeDisplay').textContent = Math.floor(myPlayer.size);
-      updateLeaderboard();
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log('Отключён от сервера');
+  socket.on('connect_error', (err) => {
+    console.error('Ошибка подключения:', err.message);
   });
 }
 
-// Обновление лидерборда
-function updateLeaderboard() {
-  const sorted = Object.values(players)
-    .sort((a, b) => b.size - a.size)
-    .slice(0, 10);
-
-  let html = '';
-  sorted.forEach((p, i) => {
-    const isMe = p.id === myId ? ' (ты)' : '';
-    html += `${i+1}. ${p.name || 'Игрок'} — ${Math.floor(p.size)}${isMe}<br>`;
-  });
-  document.getElementById('leaders').innerHTML = html;
-}
-
-// Главный игровой цикл
+// ==================== РЕНДЕР ====================
 function gameLoop() {
   if (!myPlayer) {
     requestAnimationFrame(gameLoop);
     return;
   }
 
-  // Движение к курсору
+  // Отправка позиции мыши
   const rect = canvas.getBoundingClientRect();
-  const worldMouseX = myPlayer.x + (mouseX - canvas.width / 2);
-  const worldMouseY = myPlayer.y + (mouseY - canvas.height / 2);
-
-  const dx = worldMouseX - myPlayer.x;
-  const dy = worldMouseY - myPlayer.y;
-  const dist = Math.hypot(dx, dy) || 1;
-  const speed = Math.max(3, 9.8 / (myPlayer.size / 25));
-
-  // Отправляем цель на сервер
-  socket.emit('mouseMove', { x: worldMouseX, y: worldMouseY });
+  const worldX = myPlayer.x + (mouseX - canvas.width / 2);
+  const worldY = myPlayer.y + (mouseY - canvas.height / 2);
+  socket.emit('mouseMove', { x: worldX, y: worldY });
 
   // Рендер
-  ctx.fillStyle = '#112211';
+  ctx.fillStyle = '#0f1f0f';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   ctx.save();
   ctx.translate(canvas.width/2 - myPlayer.x, canvas.height/2 - myPlayer.y);
 
   // Еда
-  ctx.fillStyle = '#ffff00';
+  ctx.fillStyle = '#ffeb3b';
   foods.forEach(f => {
     ctx.beginPath();
-    ctx.arc(f.x, f.y, f.size, 0, Math.PI * 2);
+    ctx.arc(f.x, f.y, f.size, 0, Math.PI*2);
     ctx.fill();
   });
 
   // Боты
-  Object.values(bots).forEach(bot => {
-    ctx.fillStyle = bot.color || '#8888ff';
+  bots.forEach(bot => {
+    ctx.fillStyle = bot.color;
     ctx.beginPath();
-    ctx.arc(bot.x, bot.y, bot.size, 0, Math.PI * 2);
+    ctx.arc(bot.x, bot.y, bot.size, 0, Math.PI*2);
     ctx.fill();
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#fff';
     ctx.font = '14px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(bot.name || 'Бот', bot.x, bot.y - bot.size - 10);
+    ctx.fillText(bot.name, bot.x, bot.y - bot.size - 10);
   });
 
-  // Все игроки
+  // Игроки
   Object.values(players).forEach(p => {
     ctx.fillStyle = p.color;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
     ctx.fill();
-
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#fff';
     ctx.font = '16px Arial';
     ctx.textAlign = 'center';
     ctx.fillText(p.name || 'Игрок', p.x, p.y - p.size - 12);
@@ -121,35 +108,31 @@ function gameLoop() {
   requestAnimationFrame(gameLoop);
 }
 
-// Управление мышью
-canvas.addEventListener('mousemove', (e) => {
+// Управление
+canvas.addEventListener('mousemove', e => {
   const rect = canvas.getBoundingClientRect();
   mouseX = e.clientX - rect.left;
   mouseY = e.clientY - rect.top;
 });
 
-// Раздвоение по пробелу
-document.addEventListener('keydown', (e) => {
+document.addEventListener('keydown', e => {
   if (e.key === ' ' && myPlayer && myPlayer.size > 38) {
     socket.emit('split');
-    // Локально сразу уменьшаем для отзывчивости
-    myPlayer.size /= 1.8;
+    myPlayer.size /= 1.75; // локальный отклик
   }
 });
 
-// Запуск игры
+// Запуск
 document.getElementById('playBtn').addEventListener('click', () => {
   nickname = document.getElementById('nickname').value.trim() || 'Игрок';
-
   document.getElementById('menu').style.display = 'none';
   document.getElementById('gameContainer').style.display = 'block';
 
-  connectToServer();
+  connect();
 
-  // Отправляем ник
   setTimeout(() => {
     if (socket) socket.emit('setName', nickname);
-  }, 500);
+  }, 600);
 
   gameLoop();
 });

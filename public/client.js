@@ -17,7 +17,11 @@ let mouseY = canvas.height / 2;
 
 // ==================== ПОДКЛЮЧЕНИЕ ====================
 function connect() {
-  const url = window.location.origin;   // автоматически берёт Render URL
+  // Для локальной разработки:
+  const url = 'http://localhost:3000';  // <-- явно указываем локальный сервер
+  
+  // ИЛИ если хотите автоопределение (работает и локально, и на Render):
+  // const url = window.location.origin;
 
   socket = io(url, {
     reconnection: true,

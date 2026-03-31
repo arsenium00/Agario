@@ -1,100 +1,510 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>Agar Node.js</title>
-  <style>
-    body {
-      margin: 0;
-      background: #0a0a0a;
-      color: #fff;
-      font-family: Arial, sans-serif;
-      overflow: hidden;
-      text-align: center;
-    }
-    #menu {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0, 0, 0, 0.92);
-      padding: 40px 50px;
-      border-radius: 16px;
-      box-shadow: 0 0 30px rgba(0, 255, 100, 0.5);
-      z-index: 100;
-    }
-    input, button {
-      display: block;
-      width: 300px;
-      margin: 12px auto;
-      padding: 14px;
-      font-size: 18px;
-      border-radius: 8px;
-    }
-    button {
-      background: #00ff44;
-      color: #000;
-      font-weight: bold;
-      cursor: pointer;
-      border: none;
-    }
-    button:hover {
-      background: #00ff88;
-    }
-    #gameContainer {
-      display: none;
-      position: relative;
-      width: 960px;
-      height: 640px;
-      margin: 20px auto;
-    }
-    canvas {
-      background: #112211;
-      border: 6px solid #00aa22;
-      box-shadow: 0 0 40px rgba(0, 255, 80, 0.6);
-    }
-    #hud {
-      position: absolute;
-      top: 15px;
-      left: 15px;
-      background: rgba(0,0,0,0.7);
-      padding: 10px 18px;
-      border-radius: 10px;
-      font-size: 22px;
-      pointer-events: none;
-    }
-    #leaderboard {
-      position: absolute;
-      top: 15px;
-      right: 15px;
-      background: rgba(0,0,0,0.7);
-      padding: 12px 16px;
-      border-radius: 10px;
-      font-size: 15px;
-      text-align: left;
-      min-width: 180px;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Agar.io Clone</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            background: #0a1a0a;
+        }
+
+        #menu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a3a1a 0%, #0a1a0a 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .menu-container {
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            box-shadow: 0 0 50px rgba(0, 255, 0, 0.3);
+            border: 1px solid #00ff44;
+        }
+
+        h1 {
+            color: #00ff44;
+            font-size: 48px;
+            margin-bottom: 20px;
+            text-shadow: 0 0 20px rgba(0, 255, 68, 0.5);
+        }
+
+        input {
+            width: 300px;
+            padding: 12px 20px;
+            font-size: 18px;
+            margin: 20px 0;
+            border: 2px solid #00ff44;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            outline: none;
+        }
+
+        button {
+            padding: 12px 40px;
+            font-size: 20px;
+            background: linear-gradient(135deg, #00ff44 0%, #00aa44 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(0, 255, 68, 0.5);
+        }
+
+        #gameContainer {
+            position: relative;
+            display: none;
+        }
+
+        canvas {
+            display: block;
+            cursor: crosshair;
+        }
+
+        .ui {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .stats {
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            padding: 10px 20px;
+            border-radius: 10px;
+            display: inline-block;
+            color: #00ff44;
+            font-weight: bold;
+            font-size: 18px;
+            border-left: 3px solid #00ff44;
+        }
+
+        .leaderboard {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            padding: 15px;
+            border-radius: 10px;
+            min-width: 250px;
+            max-height: 400px;
+            overflow-y: auto;
+            pointer-events: auto;
+            border-right: 3px solid #00ff44;
+        }
+
+        .leaderboard h3 {
+            color: #ffaa44;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .leaderboard div {
+            color: white;
+            padding: 5px;
+            font-size: 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            padding: 10px 15px;
+            border-radius: 10px;
+            color: white;
+            font-size: 12px;
+            pointer-events: none;
+        }
+
+        .controls span {
+            color: #00ff44;
+            font-weight: bold;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .split-effect {
+            animation: pulse 0.3s ease;
+        }
+    </style>
 </head>
 <body>
-
-  <div id="menu">
-    <h1>AGAR NODE</h1>
-    <input id="nickname" type="text" placeholder="Твой ник" value="Игрок" maxlength="14">
-    <button id="playBtn">ИГРАТЬ</button>
-    <p style="margin-top:20px; font-size:14px;">Игра работает по локальной сети и через интернет</p>
-  </div>
-
-  <div id="gameContainer">
-    <canvas id="canvas" width="960" height="640"></canvas>
-    <div id="hud">Размер: <span id="sizeDisplay">24</span></div>
-    <div id="leaderboard">
-      <strong>ТОП 10</strong><br>
-      <div id="leaders"></div>
+    <div id="menu">
+        <div class="menu-container">
+            <h1>🍃 AGAR.IO CLONE</h1>
+            <input type="text" id="nickname" placeholder="Введите никнейм" maxlength="15">
+            <br>
+            <button id="playBtn">▶ ИГРАТЬ</button>
+            <div class="controls" style="position: relative; margin-top: 20px; background: transparent;">
+                <span>🎮 Управление:</span> Мышь - движение | Пробел/Клик - разделение
+            </div>
+        </div>
     </div>
-  </div>
 
-  <script src="https://cdn.socket.io/4.8.0/socket.io.min.js"></script>
-  <script src="client.js"></script>
+    <div id="gameContainer">
+        <canvas id="canvas"></canvas>
+        <div class="ui">
+            <div class="stats">
+                📊 Размер: <span id="sizeDisplay">0</span>
+            </div>
+        </div>
+        <div class="leaderboard">
+            <h3>🏆 ТОП ИГРОКОВ</h3>
+            <div id="leaders"></div>
+        </div>
+        <div class="controls">
+            <span>🎮 Управление:</span> Мышь - движение | Пробел/Клик - разделение | E - выброс массы
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let canvas, ctx;
+        let playerId = null;
+        let mapWidth = 5000, mapHeight = 5000;
+        let camera = { x: 0, y: 0 };
+        let players = {};
+        let foods = [];
+        let bots = {};
+        let myPlayer = null;
+
+        const VIEW_WIDTH = window.innerWidth;
+        const VIEW_HEIGHT = window.innerHeight;
+
+        let mouseX = VIEW_WIDTH / 2;
+        let mouseY = VIEW_HEIGHT / 2;
+        
+        let frameRequest = null;
+        let lastTimestamp = 0;
+        let frameInterval = 1000 / 60;
+        
+        let splitEffect = false;
+        let effectTimer = null;
+
+        socket.on('init', (data) => {
+            playerId = data.id;
+            mapWidth = data.mapWidth;
+            mapHeight = data.mapHeight;
+            
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('gameContainer').style.display = 'block';
+            
+            initCanvas();
+            startGameLoop();
+            
+            // Адаптация под размер окна
+            window.addEventListener('resize', () => {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            });
+        });
+
+        socket.on('gameState', (data) => {
+            players = data.players;
+            foods = data.foods;
+            bots = data.bots;
+            
+            if (players[playerId]) {
+                myPlayer = players[playerId];
+                document.getElementById('sizeDisplay').innerText = Math.floor(myPlayer.size);
+            }
+            
+            updateLeaderboard();
+        });
+        
+        socket.on('playerEaten', (id) => {
+            if (id === playerId) {
+                // Эффект при смерти
+                showDeathEffect();
+            }
+        });
+
+        function showDeathEffect() {
+            const gameContainer = document.getElementById('gameContainer');
+            gameContainer.style.opacity = '0.5';
+            setTimeout(() => {
+                gameContainer.style.opacity = '1';
+            }, 500);
+        }
+
+        function initCanvas() {
+            canvas = document.getElementById('canvas');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            ctx = canvas.getContext('2d');
+            
+            let lastMouseEmit = 0;
+            const MOUSE_EMIT_DELAY = 16;
+            
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                
+                let canvasX = (e.clientX - rect.left) * scaleX;
+                let canvasY = (e.clientY - rect.top) * scaleY;
+                
+                const worldX = camera.x + canvasX;
+                const worldY = camera.y + canvasY;
+                
+                mouseX = worldX;
+                mouseY = worldY;
+                
+                const now = Date.now();
+                if (now - lastMouseEmit > MOUSE_EMIT_DELAY) {
+                    socket.emit('mouseMove', { x: worldX, y: worldY });
+                    lastMouseEmit = now;
+                }
+            });
+            
+            canvas.addEventListener('click', () => {
+                socket.emit('split');
+                // Визуальный эффект сплита
+                splitEffect = true;
+                if (effectTimer) clearTimeout(effectTimer);
+                effectTimer = setTimeout(() => {
+                    splitEffect = false;
+                }, 300);
+            });
+            
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    socket.emit('split');
+                    splitEffect = true;
+                    if (effectTimer) clearTimeout(effectTimer);
+                    effectTimer = setTimeout(() => {
+                        splitEffect = false;
+                    }, 300);
+                }
+                if (e.code === 'KeyE') {
+                    e.preventDefault();
+                    socket.emit('eject');
+                }
+            });
+        }
+
+        function updateLeaderboard() {
+            const allPlayers = [...Object.values(players), ...Object.values(bots)];
+            const sorted = allPlayers.sort((a, b) => b.size - a.size);
+            const top10 = sorted.slice(0, 10);
+            
+            const leadersDiv = document.getElementById('leaders');
+            leadersDiv.innerHTML = top10.map((p, i) => {
+                const isPlayer = p.id === playerId;
+                const prefix = isPlayer ? '👉 ' : `${i+1}. `;
+                const name = p.name || (p.id?.startsWith('bot') ? p.name || '🤖 Бот' : 'Игрок');
+                return `<div style="${isPlayer ? 'color: #00ff44; font-weight: bold;' : ''}">
+                    ${prefix}${name} - ${Math.floor(p.size)}
+                </div>`;
+            }).join('');
+        }
+
+        function startGameLoop() {
+            function updateCamera() {
+                if (myPlayer) {
+                    camera.x = myPlayer.x - VIEW_WIDTH / 2;
+                    camera.y = myPlayer.y - VIEW_HEIGHT / 2;
+                    
+                    camera.x = Math.max(0, Math.min(mapWidth - VIEW_WIDTH, camera.x));
+                    camera.y = Math.max(0, Math.min(mapHeight - VIEW_HEIGHT, camera.y));
+                }
+            }
+            
+            function draw() {
+                if (!ctx) return;
+                
+                // Очистка с градиентом
+                const gradient = ctx.createLinearGradient(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+                gradient.addColorStop(0, '#1a3a1a');
+                gradient.addColorStop(1, '#0a2a0a');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+                
+                // Динамическая сетка
+                ctx.strokeStyle = '#2a5a2a';
+                ctx.lineWidth = 1;
+                const gridSize = 100;
+                const startX = Math.floor(camera.x / gridSize) * gridSize;
+                const startY = Math.floor(camera.y / gridSize) * gridSize;
+                
+                for (let x = startX; x < camera.x + VIEW_WIDTH; x += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(x - camera.x, 0);
+                    ctx.lineTo(x - camera.x, VIEW_HEIGHT);
+                    ctx.stroke();
+                }
+                for (let y = startY; y < camera.y + VIEW_HEIGHT; y += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y - camera.y);
+                    ctx.lineTo(VIEW_WIDTH, y - camera.y);
+                    ctx.stroke();
+                }
+                
+                // Еда (зеленые шарики)
+                for (let f of foods) {
+                    const screenX = f.x - camera.x;
+                    const screenY = f.y - camera.y;
+                    if (screenX + f.size > 0 && screenX - f.size < VIEW_WIDTH &&
+                        screenY + f.size > 0 && screenY - f.size < VIEW_HEIGHT) {
+                        
+                        ctx.beginPath();
+                        ctx.arc(screenX, screenY, f.size, 0, Math.PI * 2);
+                        const grad = ctx.createRadialGradient(screenX - 2, screenY - 2, 1, screenX, screenY, f.size);
+                        grad.addColorStop(0, '#88ff88');
+                        grad.addColorStop(1, '#22aa22');
+                        ctx.fillStyle = grad;
+                        ctx.fill();
+                        
+                        ctx.beginPath();
+                        ctx.arc(screenX - 2, screenY - 2, f.size / 3, 0, Math.PI * 2);
+                        ctx.fillStyle = '#ccffcc';
+                        ctx.fill();
+                    }
+                }
+                
+                // Боты
+                for (let id in bots) {
+                    const b = bots[id];
+                    const screenX = b.x - camera.x;
+                    const screenY = b.y - camera.y;
+                    if (screenX + b.size > 0 && screenX - b.size < VIEW_WIDTH &&
+                        screenY + b.size > 0 && screenY - b.size < VIEW_HEIGHT) {
+                        
+                        ctx.beginPath();
+                        ctx.arc(screenX, screenY, b.size, 0, Math.PI * 2);
+                        ctx.fillStyle = b.color;
+                        ctx.fill();
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                        
+                        ctx.font = `bold ${Math.max(12, Math.floor(b.size / 3.5))}px Arial`;
+                        ctx.fillStyle = '#ffffff';
+                        ctx.shadowBlur = 3;
+                        ctx.fillText(b.name, screenX - ctx.measureText(b.name).width / 2, screenY - b.size / 2 - 5);
+                        ctx.font = `${Math.max(10, Math.floor(b.size / 4))}px Arial`;
+                        ctx.fillStyle = '#ffffaa';
+                        ctx.fillText(Math.floor(b.size), screenX - 10, screenY + 5);
+                        ctx.shadowBlur = 0;
+                    }
+                }
+                
+                // Игроки
+                for (let id in players) {
+                    const p = players[id];
+                    const screenX = p.x - camera.x;
+                    const screenY = p.y - camera.y;
+                    if (screenX + p.size > 0 && screenX - p.size < VIEW_WIDTH &&
+                        screenY + p.size > 0 && screenY - p.size < VIEW_HEIGHT) {
+                        
+                        ctx.beginPath();
+                        ctx.arc(screenX, screenY, p.size, 0, Math.PI * 2);
+                        
+                        if (id === playerId) {
+                            const grad = ctx.createRadialGradient(screenX - 5, screenY - 5, 5, screenX, screenY, p.size);
+                            grad.addColorStop(0, '#88ff88');
+                            grad.addColorStop(1, '#33aa33');
+                            ctx.fillStyle = grad;
+                            ctx.shadowBlur = splitEffect ? 20 : 10;
+                            ctx.shadowColor = '#88ff88';
+                        } else {
+                            ctx.fillStyle = p.color;
+                            ctx.shadowBlur = 0;
+                        }
+                        ctx.fill();
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                        
+                        ctx.font = `bold ${Math.max(12, Math.floor(p.size / 3))}px Arial`;
+                        ctx.fillStyle = '#ffffff';
+                        ctx.shadowBlur = 3;
+                        ctx.fillText(p.name, screenX - ctx.measureText(p.name).width / 2, screenY - p.size / 2 - 5);
+                        ctx.font = `${Math.max(10, Math.floor(p.size / 3.5))}px Arial`;
+                        ctx.fillStyle = '#ffffaa';
+                        ctx.fillText(Math.floor(p.size), screenX - 12, screenY + 6);
+                        ctx.shadowBlur = 0;
+                    }
+                }
+                
+                // Прицел
+                if (myPlayer) {
+                    ctx.beginPath();
+                    ctx.arc(mouseX - camera.x, mouseY - camera.y, 15, 0, Math.PI * 2);
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(mouseX - camera.x - 22, mouseY - camera.y);
+                    ctx.lineTo(mouseX - camera.x + 22, mouseY - camera.y);
+                    ctx.moveTo(mouseX - camera.x, mouseY - camera.y - 22);
+                    ctx.lineTo(mouseX - camera.x, mouseY - camera.y + 22);
+                    ctx.stroke();
+                    
+                    // Дополнительный круг для выброса
+                    ctx.beginPath();
+                    ctx.arc(mouseX - camera.x, mouseY - camera.y, 8, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                    ctx.fill();
+                }
+            }
+            
+            function animate(timestamp) {
+                if (timestamp - lastTimestamp >= frameInterval) {
+                    updateCamera();
+                    draw();
+                    lastTimestamp = timestamp;
+                }
+                frameRequest = requestAnimationFrame(animate);
+            }
+            
+            animate(0);
+        }
+
+        document.getElementById('playBtn').addEventListener('click', () => {
+            const name = document.getElementById('nickname').value.trim();
+            if (name) {
+                socket.emit('setName', name);
+            } else {
+                socket.emit('setName', 'Игрок');
+            }
+        });
+    </script>
 </body>
-</html>

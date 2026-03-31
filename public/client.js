@@ -15,13 +15,22 @@ const MAP_HEIGHT = 2200;
 let mouseX = canvas.width / 2;
 let mouseY = canvas.height / 2;
 
+// Автоматическое определение размера canvas
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  mouseX = canvas.width / 2;
+  mouseY = canvas.height / 2;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
 // ==================== ПОДКЛЮЧЕНИЕ ====================
 function connect() {
-  // Для локальной разработки:
-  const url = 'http://localhost:3000';  // <-- явно указываем локальный сервер
+  // Используем текущий URL (автоматически подхватит порт)
+  const url = window.location.origin;
   
-  // ИЛИ если хотите автоопределение (работает и локально, и на Render):
-  // const url = window.location.origin;
+  console.log('Подключение к:', url);
 
   socket = io(url, {
     reconnection: true,
@@ -32,11 +41,12 @@ function connect() {
   });
 
   socket.on('connect', () => {
-    console.log('Подключено к серверу');
+    console.log('✅ Подключено к серверу');
   });
 
   socket.on('init', (data) => {
     myId = data.id;
+    console.log('Получен ID:', myId);
   });
 
   socket.on('gameState', (state) => {
@@ -51,7 +61,12 @@ function connect() {
   });
 
   socket.on('connect_error', (err) => {
-    console.error('Ошибка подключения:', err.message);
+    console.error('❌ Ошибка подключения:', err.message);
+  });
+  
+  socket.on('disconnect', () => {
+    console.log('⚠️ Отключено от сервера');
+    myPlayer = null;
   });
 }
 
@@ -66,7 +81,7 @@ function gameLoop() {
   const rect = canvas.getBoundingClientRect();
   const worldX = myPlayer.x + (mouseX - canvas.width / 2);
   const worldY = myPlayer.y + (mouseY - canvas.height / 2);
-  socket.emit('mouseMove', { x: worldX, y: worldY });
+  if (socket) socket.emit('mouseMove', { x: worldX, y: worldY });
 
   // Рендер
   ctx.fillStyle = '#0f1f0f';
@@ -120,9 +135,9 @@ canvas.addEventListener('mousemove', e => {
 });
 
 document.addEventListener('keydown', e => {
-  if (e.key === ' ' && myPlayer && myPlayer.size > 38) {
+  if (e.key === ' ' && myPlayer && myPlayer.size > 38 && socket) {
     socket.emit('split');
-    myPlayer.size /= 1.75; // локальный отклик
+    // Убираем локальное изменение, доверяем серверу
   }
 });
 

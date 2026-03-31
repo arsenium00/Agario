@@ -14,6 +14,12 @@ const VIEW_HEIGHT = 640;
 let mouseX = VIEW_WIDTH / 2;
 let mouseY = VIEW_HEIGHT / 2;
 
+// Оптимизация: флаги для контроля отрисовки
+let frameRequest = null;
+let lastTimestamp = 0;
+let fps = 60;
+let frameInterval = 1000 / 60;
+
 // Инициализация после подключения
 socket.on('init', (data) => {
   playerId = data.id;
@@ -44,6 +50,14 @@ function initCanvas() {
   canvas = document.getElementById('canvas');
   ctx = canvas.getContext('2d');
   
+  // Устанавливаем размеры canvas
+  canvas.width = VIEW_WIDTH;
+  canvas.height = VIEW_HEIGHT;
+  
+  // Оптимизация: throttle для mouse move
+  let lastMouseEmit = 0;
+  const MOUSE_EMIT_DELAY = 16; // ~60fps
+  
   canvas.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -58,14 +72,19 @@ function initCanvas() {
     mouseX = worldX;
     mouseY = worldY;
     
-    socket.emit('mouseMove', { x: worldX, y: worldY });
+    // Throttle отправки на сервер
+    const now = Date.now();
+    if (now - lastMouseEmit > MOUSE_EMIT_DELAY) {
+      socket.emit('mouseMove', { x: worldX, y: worldY });
+      lastMouseEmit = now;
+    }
   });
   
   canvas.addEventListener('click', () => {
     socket.emit('split');
   });
   
-  // Косое движение для сплита
+  // Пробел для сплита
   document.addEventListener('keydown', (e) => {
     if (e.code === 'Space') {
       e.preventDefault();
@@ -106,13 +125,14 @@ function startGameLoop() {
     ctx.fillStyle = '#1a2a1a';
     ctx.fillRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
     
-    // Сетка
+    // Сетка (оптимизированная)
     ctx.strokeStyle = '#2a4a2a';
     ctx.lineWidth = 1;
     const gridSize = 100;
     const startX = Math.floor(camera.x / gridSize) * gridSize;
     const startY = Math.floor(camera.y / gridSize) * gridSize;
     
+    // Оптимизация: рисуем только видимые линии сетки
     for (let x = startX; x < camera.x + VIEW_WIDTH; x += gridSize) {
       ctx.beginPath();
       ctx.moveTo(x - camera.x, 0);
@@ -126,26 +146,31 @@ function startGameLoop() {
       ctx.stroke();
     }
     
-    // Еда
+    // Еда (зеленые шарики как в agar.io)
     for (let f of foods) {
       const screenX = f.x - camera.x;
       const screenY = f.y - camera.y;
       if (screenX + f.size > 0 && screenX - f.size < VIEW_WIDTH &&
           screenY + f.size > 0 && screenY - f.size < VIEW_HEIGHT) {
         
+        // Зеленые шарики с градиентом
         ctx.beginPath();
         ctx.arc(screenX, screenY, f.size, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffaa44';
+        const grad = ctx.createRadialGradient(screenX - 2, screenY - 2, 1, screenX, screenY, f.size);
+        grad.addColorStop(0, '#44ff44');
+        grad.addColorStop(1, '#00aa44');
+        ctx.fillStyle = grad;
         ctx.fill();
-        ctx.shadowBlur = 8;
-        ctx.fillStyle = '#ffdd88';
-        ctx.arc(screenX, screenY, f.size - 2, 0, Math.PI * 2);
+        
+        // Блик
+        ctx.beginPath();
+        ctx.arc(screenX - 2, screenY - 2, f.size / 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#aaffaa';
         ctx.fill();
-        ctx.shadowBlur = 0;
       }
     }
     
-    // Боты
+    // Боты (без свечения)
     for (let b of bots) {
       const screenX = b.x - camera.x;
       const screenY = b.y - camera.y;
@@ -162,16 +187,14 @@ function startGameLoop() {
         
         ctx.font = `bold ${Math.max(12, Math.floor(b.size / 3.5))}px Arial`;
         ctx.fillStyle = '#ffffff';
-        ctx.shadowBlur = 3;
         ctx.fillText(b.name, screenX - ctx.measureText(b.name).width / 2, screenY - b.size / 2 - 5);
         ctx.font = `${Math.max(10, Math.floor(b.size / 4))}px Arial`;
         ctx.fillStyle = '#ffffaa';
         ctx.fillText(Math.floor(b.size), screenX - 10, screenY + 5);
-        ctx.shadowBlur = 0;
       }
     }
     
-    // Игроки
+    // Игроки (минимальное свечение только для своего игрока)
     for (let id in players) {
       const p = players[id];
       const screenX = p.x - camera.x;
@@ -187,11 +210,12 @@ function startGameLoop() {
           grad.addColorStop(0, '#00ff88');
           grad.addColorStop(1, '#00aa44');
           ctx.fillStyle = grad;
-          ctx.shadowBlur = 15;
-          ctx.shadowColor = '#00ff44';
+          // Уменьшенное свечение только для своего игрока
+          ctx.shadowBlur = 8;
+          ctx.shadowColor = '#44ff44';
         } else {
           ctx.fillStyle = p.color;
-          ctx.shadowBlur = 5;
+          ctx.shadowBlur = 0;
         }
         ctx.fill();
         ctx.strokeStyle = '#ffffff';
@@ -200,7 +224,6 @@ function startGameLoop() {
         
         ctx.font = `bold ${Math.max(12, Math.floor(p.size / 3))}px Arial`;
         ctx.fillStyle = '#ffffff';
-        ctx.shadowBlur = 3;
         ctx.fillText(p.name, screenX - ctx.measureText(p.name).width / 2, screenY - p.size / 2 - 5);
         ctx.font = `${Math.max(10, Math.floor(p.size / 3.5))}px Arial`;
         ctx.fillStyle = '#ffffaa';
@@ -209,7 +232,7 @@ function startGameLoop() {
       }
     }
     
-    // Прицел
+    // Прицел (без свечения)
     if (myPlayer) {
       ctx.beginPath();
       ctx.arc(mouseX - camera.x, mouseY - camera.y, 12, 0, Math.PI * 2);
@@ -225,13 +248,17 @@ function startGameLoop() {
     }
   }
   
-  function animate() {
-    updateCamera();
-    draw();
-    requestAnimationFrame(animate);
+  function animate(timestamp) {
+    // Оптимизация: контроль FPS
+    if (timestamp - lastTimestamp >= frameInterval) {
+      updateCamera();
+      draw();
+      lastTimestamp = timestamp;
+    }
+    frameRequest = requestAnimationFrame(animate);
   }
   
-  animate();
+  animate(0);
 }
 
 // Отправка ника
